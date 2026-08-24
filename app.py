@@ -8,6 +8,7 @@ app.secret_key = "utesa_carnetizacion_2024"
 
 CARPETA = "/tmp/documentos"
 HISTORIAL_FILE = "/tmp/historial.json"
+TURNO_FILE = "/tmp/turno.json"
 os.makedirs(CARPETA, exist_ok=True)
 
 CLAVE = "utesa2026"
@@ -36,9 +37,18 @@ def guardar_historial(h):
     with open(HISTORIAL_FILE, "w") as f:
         json.dump(h, f, ensure_ascii=False)
 
+def cargar_turno():
+    if os.path.exists(TURNO_FILE):
+        with open(TURNO_FILE) as f:
+            return json.load(f).get("actual", 0)
+    return 0
+
 def siguiente_turno():
-    h = cargar_historial()
-    return len(h) + 1
+    actual = cargar_turno()
+    nuevo = (actual % 50) + 1
+    with open(TURNO_FILE, "w") as f:
+        json.dump({"actual": nuevo}, f)
+    return nuevo
 
 LOGIN = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -130,6 +140,9 @@ td{padding:9px 10px;border-bottom:1px solid #eee;vertical-align:middle}
       <button class="btn btn-del" style="width:100%;padding:10px;font-size:14px">🗑 Borrar todos los pendientes</button>
     </form>
     {% endif %}
+    <form method="post" action="/reiniciar-turno" onsubmit="return confirm('¿Reiniciar el contador de turnos desde #1?')" style="margin-top:10px">
+      <button class="btn" type="submit" style="width:100%;padding:10px;font-size:14px;background:#e67e22;color:white">🔄 Reiniciar turnos desde #1</button>
+    </form>
     {% else %}
     <p class="empty">No hay documentos pendientes.</p>
     {% endif %}
@@ -303,7 +316,7 @@ def subir():
         contenido = f.read()
         if len(contenido) > MAX_MB * 1024 * 1024:
             return render_template_string(FORM)
-        turno = siguiente_turno() + 1
+        turno = siguiente_turno()
         fecha = datetime.now()
         fecha_str = fecha.strftime("%d/%m/%Y %H:%M")
         marca = fecha.strftime("%Y%m%d_%H%M%S")
@@ -345,6 +358,14 @@ def borrar_todos():
         return redirect("/")
     for f in os.listdir(CARPETA):
         os.remove(os.path.join(CARPETA, f))
+    return redirect("/panel")
+
+@app.route("/reiniciar-turno", methods=["POST"])
+def reiniciar_turno():
+    if not session.get("auth"):
+        return redirect("/")
+    with open(TURNO_FILE, "w") as f:
+        json.dump({"actual": 0}, f)
     return redirect("/panel")
 
 @app.route("/logout")
