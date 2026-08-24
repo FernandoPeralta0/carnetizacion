@@ -4,12 +4,12 @@ from datetime import datetime
 import qrcode
 
 app = Flask(__name__)
-app.secret_key = "utesa_2026"
+app.secret_key = "utesa_carnetizacion_2024"
 
 CARPETA = "/tmp/documentos"
 os.makedirs(CARPETA, exist_ok=True)
 
-CLAVE = "carnet2024"  # <-- cambia esta contraseña
+CLAVE = "utesa2026"  # <-- cambia esta contraseña
 
 EXTS = {"pdf","jpg","jpeg","png","doc","docx"}
 
