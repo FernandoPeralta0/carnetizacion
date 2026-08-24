@@ -4,7 +4,7 @@ from datetime import datetime
 import qrcode
 
 app = Flask(__name__)
-app.secret_key = "utesa_carnetizacion_2024"
+app.secret_key = "utesa_2026"
 
 CARPETA = "/tmp/documentos"
 os.makedirs(CARPETA, exist_ok=True)
