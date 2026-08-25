@@ -1,5 +1,5 @@
-import os, io, base64, json
-from flask import Flask, request, render_template_string, send_file, redirect, session
+import os, io, base64, json, csv
+from flask import Flask, request, render_template_string, send_file, redirect, session, Response
 from datetime import datetime
 import qrcode
 
@@ -18,6 +18,9 @@ MAX_MB = 25
 
 def ext_ok(n):
     return "." in n and n.rsplit(".",1)[1].lower() in EXTS
+
+def es_imagen(n):
+    return "." in n and n.rsplit(".",1)[1].lower() in {"jpg","jpeg","png"}
 
 def generar_qr(url):
     qr = qrcode.QRCode(box_size=8, border=4)
@@ -70,8 +73,6 @@ def get_estado():
         guardar_estado(e)
     return e
 
-# ─── TEMPLATES ───────────────────────────────────────────────
-
 LOGIN = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Carnetización - Acceso</title>
@@ -96,62 +97,65 @@ PANEL = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f0f2f5;padding:20px 16px}
-.wrap{max-width:620px;margin:0 auto}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.wrap{max-width:680px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px}
 .card{background:white;padding:24px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.1);margin-bottom:18px;text-align:center}
 h1{color:#1a1a2e;font-size:20px;margin-bottom:6px}
 p{color:#666;font-size:13px;margin-bottom:8px}
-img.qr{width:190px;height:190px;margin:8px 0}
+img.qr{width:180px;height:180px;margin:8px 0}
 .url{font-size:11px;color:#aaa;word-break:break-all}
 .stats{display:flex;gap:12px;margin-bottom:18px}
-.stat{flex:1;background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.08)}
-.stat-num{font-size:32px;font-weight:700;color:#1a1a2e}
-.stat-label{font-size:12px;color:#888;margin-top:4px}
+.stat{flex:1;background:white;border-radius:12px;padding:14px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.stat-num{font-size:28px;font-weight:700;color:#1a1a2e}
+.stat-label{font-size:11px;color:#888;margin-top:4px}
 .tabs{display:flex;gap:8px;margin-bottom:14px}
 .tab{flex:1;padding:9px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:13px;background:white;color:#555;font-weight:600}
 .tab.active{background:#1a1a2e;color:white;border-color:#1a1a2e}
 .section{display:none}.section.active{display:block}
-table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
-th{background:#f4f4f4;padding:8px 10px;color:#333}
-td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle}
-.btn{display:inline-block;padding:5px 11px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;border:none;cursor:pointer;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:12px;text-align:left}
+th{background:#f4f4f4;padding:8px 8px;color:#333}
+td{padding:8px 8px;border-bottom:1px solid #eee;vertical-align:middle}
+.btn{display:inline-block;padding:5px 10px;border-radius:6px;text-decoration:none;font-size:11px;font-weight:600;border:none;cursor:pointer;white-space:nowrap}
 .bl{background:#1a1a2e;color:white}
 .bg{background:#27ae60;color:white}
 .br{background:#e74c3c;color:white}
 .bo{background:#e67e22;color:white}
 .bb{background:#1a73e8;color:white}
 .bpurple{background:#8e44ad;color:white}
-.btn-logout{background:#555;color:white;font-size:12px;padding:7px 16px;border-radius:6px;text-decoration:none}
-.badge{display:inline-block;background:#1a1a2e;color:white;border-radius:50%;width:28px;height:28px;line-height:28px;text-align:center;font-weight:700;font-size:12px}
+.btn-logout{background:#555;color:white;font-size:12px;padding:7px 14px;border-radius:6px;text-decoration:none}
+.badge{display:inline-block;background:#1a1a2e;color:white;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;font-size:11px}
 .badge-g{background:#27ae60}
 .empty{color:#999;padding:16px 0;font-size:14px;text-align:center}
 .nuevo{background:#fff8e1}
-.btn-full{width:100%;padding:10px;font-size:14px;margin-top:8px}
-.pantalla-link{display:inline-block;margin-top:10px;padding:8px 18px;background:#8e44ad;color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600}
+.btn-full{width:100%;padding:10px;font-size:13px;margin-top:8px}
+.buscar{width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box}
+.preview-thumb{width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #eee}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:999;align-items:center;justify-content:center}
+.modal.open{display:flex}
+.modal img{max-width:90%;max-height:90vh;border-radius:8px}
+.modal-close{position:absolute;top:20px;right:28px;color:white;font-size:32px;cursor:pointer;font-weight:700}
 </style>
 <audio id="alerta" src="https://www.soundjay.com/buttons/sounds/button-09.mp3" preload="auto"></audio>
 </head><body><div class="wrap">
+
+<div id="modal" class="modal" onclick="cerrarModal()">
+  <span class="modal-close">✕</span>
+  <img id="modal-img" src="" alt="Vista previa">
+</div>
+
 <div class="top">
   <span style="font-size:13px;color:#555">Bienvenida 👋</span>
-  <div style="display:flex;gap:8px;align-items:center">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <a href="/pantalla" target="_blank" class="btn bpurple">📺 Pantalla turnos</a>
+    <a href="/exportar" class="btn bg">📥 Exportar Excel</a>
     <a href="/logout" class="btn-logout">Cerrar sesión</a>
   </div>
 </div>
 
 <div class="stats">
-  <div class="stat">
-    <div class="stat-num">{{ total }}</div>
-    <div class="stat-label">Pendientes</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num" style="color:#27ae60">{{ atendidos_hoy }}</div>
-    <div class="stat-label">Atendidos hoy</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num" style="color:#8e44ad">{% if turno_actual > 0 %}#{{ turno_actual }}{% else %}—{% endif %}</div>
-    <div class="stat-label">Turno en pantalla</div>
-  </div>
+  <div class="stat"><div class="stat-num">{{ total }}</div><div class="stat-label">Pendientes</div></div>
+  <div class="stat"><div class="stat-num" style="color:#27ae60">{{ atendidos_hoy }}</div><div class="stat-label">Atendidos hoy</div></div>
+  <div class="stat"><div class="stat-num" style="color:#8e44ad">{% if turno_actual > 0 %}#{{ turno_actual }}{% else %}—{% endif %}</div><div class="stat-label">Turno en pantalla</div></div>
 </div>
 
 <div class="card">
@@ -170,26 +174,31 @@ td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle}
   <div id="pendientes" class="section active">
     {% if archivos %}
     <table>
-      <tr><th>#</th><th>Nombre</th><th>Hora</th><th>Tam.</th><th colspan="3">Acciones</th></tr>
+      <tr><th>#</th><th>Preview</th><th>Nombre</th><th>Hora</th><th>Tam.</th><th colspan="3">Acciones</th></tr>
       {% for a in archivos %}
       <tr class="{{ 'nuevo' if loop.first else '' }}">
         <td><span class="badge">{{ a.turno }}</span></td>
-        <td style="word-break:break-all;max-width:130px">{{ a.nombre_estudiante }}</td>
+        <td>
+          {% if a.es_imagen %}
+          <img class="preview-thumb" src="/preview/{{ a.archivo }}" onclick="abrirModal('/preview/{{ a.archivo }}')" alt="preview">
+          {% else %}
+          <span style="font-size:20px">📄</span>
+          {% endif %}
+        </td>
+        <td style="word-break:break-all;max-width:120px">{{ a.nombre_estudiante }}</td>
         <td style="white-space:nowrap">{{ a.hora }}</td>
         <td>{{ a.tamano }}</td>
         <td>
           <form method="post" action="/llamar/{{ a.turno }}" style="display:inline">
-            <button class="btn bpurple" title="Mostrar en pantalla">📺 Llamar</button>
+            <button class="btn bpurple">📺 Llamar</button>
           </form>
         </td>
         <td>
           <form method="post" action="/atender/{{ a.archivo }}" style="display:inline" onsubmit="return confirm('¿Marcar como atendido?')">
-            <button class="btn bg" title="Marcar atendido">✓ Atendido</button>
+            <button class="btn bg">✓ Atendido</button>
           </form>
         </td>
-        <td>
-          <a class="btn bb" href="/descargar/{{ a.archivo }}">⬇</a>
-        </td>
+        <td><a class="btn bb" href="/descargar/{{ a.archivo }}">⬇</a></td>
       </tr>
       {% endfor %}
     </table>
@@ -208,13 +217,14 @@ td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle}
   </div>
 
   <div id="historial" class="section">
+    <input class="buscar" type="text" id="buscar" placeholder="🔍 Buscar por nombre, fecha o turno..." oninput="filtrarHistorial()">
     {% if historial %}
-    <table>
-      <tr><th>#</th><th>Nombre</th><th>Fecha y hora</th><th>Tam.</th><th>Estado</th></tr>
+    <table id="tabla-historial">
+      <tr><th>#</th><th>Nombre</th><th>Fecha y hora</th><th>Tamaño</th><th>Estado</th></tr>
       {% for h in historial|reverse %}
-      <tr>
+      <tr class="fila-hist">
         <td><span class="badge badge-g">{{ h.turno }}</span></td>
-        <td style="word-break:break-all;max-width:160px">{{ h.nombre }}</td>
+        <td style="word-break:break-all;max-width:180px">{{ h.nombre }}</td>
         <td style="white-space:nowrap">{{ h.fecha }}</td>
         <td>{{ h.tamano }}</td>
         <td style="color:#27ae60;font-weight:600">✓ Atendido</td>
@@ -227,6 +237,7 @@ td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle}
   </div>
 </div>
 </div>
+
 <script>
 function mostrar(id,btn){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -234,16 +245,29 @@ function mostrar(id,btn){
   document.getElementById(id).classList.add('active');
   btn.classList.add('active');
 }
-var totalAnterior = {{ total }};
+function abrirModal(src){
+  document.getElementById('modal-img').src=src;
+  document.getElementById('modal').classList.add('open');
+}
+function cerrarModal(){
+  document.getElementById('modal').classList.remove('open');
+}
+function filtrarHistorial(){
+  var q=document.getElementById('buscar').value.toLowerCase();
+  document.querySelectorAll('.fila-hist').forEach(function(row){
+    row.style.display=row.textContent.toLowerCase().includes(q)?'':'none';
+  });
+}
+var totalAnterior={{ total }};
 setInterval(function(){
   fetch('/total').then(r=>r.json()).then(d=>{
-    if(d.total > totalAnterior){
+    if(d.total>totalAnterior){
       document.getElementById('alerta').play();
-      totalAnterior = d.total;
+      totalAnterior=d.total;
       location.reload();
     }
   });
-}, 5000);
+},5000);
 </script>
 </body></html>"""
 
@@ -260,25 +284,47 @@ input{width:100%;padding:11px;border:1px solid #ccc;border-radius:8px;font-size:
 button{width:100%;margin-top:22px;padding:15px;background:#1a73e8;color:white;border:none;border-radius:8px;font-size:17px;cursor:pointer}
 .info{font-size:12px;color:#888;margin-top:4px}
 .err-size{color:#c0392b;font-size:13px;margin-top:6px;display:none}
+.preview-box{margin-top:12px;text-align:center;display:none}
+.preview-box img{max-width:100%;max-height:200px;border-radius:8px;border:1px solid #eee}
+.preview-box .nombre-archivo{font-size:12px;color:#666;margin-top:6px}
 </style></head><body><div class="card">
 <h2>📄 Enviar documento a imprimir</h2>
 <form method="post" enctype="multipart/form-data" onsubmit="return validar()">
   <label>Tu nombre</label>
   <input type="text" name="nombre" placeholder="Ej. Juan Pérez" required>
   <label>Selecciona el documento</label>
-  <input type="file" name="doc" id="doc" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" required onchange="mostrarPeso()">
+  <input type="file" name="doc" id="doc" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" required onchange="mostrarPreview()">
   <div class="info">Formatos: PDF, Word, JPG, PNG &nbsp;•&nbsp; Máximo: 25 MB</div>
   <div id="peso" class="info" style="color:#1a73e8;margin-top:4px"></div>
   <div id="err-size" class="err-size">⚠ El archivo supera los 25 MB.</div>
+  <div class="preview-box" id="preview-box">
+    <img id="preview-img" src="" alt="Vista previa">
+    <div class="nombre-archivo" id="nombre-archivo"></div>
+  </div>
   <button type="submit">📤 Enviar documento</button>
 </form></div>
 <script>
-function mostrarPeso(){
+function mostrarPreview(){
   var f=document.getElementById('doc').files[0];
+  var err=document.getElementById('err-size');
+  var info=document.getElementById('peso');
+  var box=document.getElementById('preview-box');
+  var img=document.getElementById('preview-img');
+  var nombre=document.getElementById('nombre-archivo');
   if(f){
     var mb=(f.size/1024/1024).toFixed(2);
-    document.getElementById('peso').textContent='Tamaño: '+mb+' MB';
-    document.getElementById('err-size').style.display=f.size>25*1024*1024?'block':'none';
+    info.textContent='Tamaño: '+mb+' MB';
+    err.style.display=f.size>25*1024*1024?'block':'none';
+    nombre.textContent=f.name;
+    if(f.type.startsWith('image/')){
+      var reader=new FileReader();
+      reader.onload=function(e){img.src=e.target.result;box.style.display='block';};
+      reader.readAsDataURL(f);
+    } else {
+      img.src='';
+      box.style.display='block';
+      img.style.display='none';
+    }
   }
 }
 function validar(){
@@ -286,7 +332,8 @@ function validar(){
   if(f&&f.size>25*1024*1024){document.getElementById('err-size').style.display='block';return false;}
   return true;
 }
-</script></body></html>"""
+</script>
+</body></html>"""
 
 CONFIRMACION = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -316,38 +363,32 @@ p{color:#666;font-size:15px;margin-bottom:6px}
 </div></body></html>"""
 
 PANTALLA = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Turnos - Carnetización UTESA</title>
+<title>Turnos - Carnetización</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:20px}
-h1{color:white;font-size:28px;margin-bottom:8px;opacity:0.7}
-.sub{color:#aaa;font-size:16px;margin-bottom:40px}
-.turno-box{background:white;border-radius:24px;padding:40px 60px;margin-bottom:30px}
-.label{color:#888;font-size:18px;margin-bottom:10px}
-.numero{font-size:160px;font-weight:700;color:#1a1a2e;line-height:1}
+h1{color:white;font-size:26px;margin-bottom:6px;opacity:0.7}
+.sub{color:#aaa;font-size:15px;margin-bottom:36px}
+.turno-box{background:white;border-radius:24px;padding:36px 56px;margin-bottom:28px}
+.label{color:#888;font-size:17px;margin-bottom:8px}
+.numero{font-size:150px;font-weight:700;color:#1a1a2e;line-height:1}
 .esperando{color:#aaa;font-size:20px;margin-top:10px}
-.atendidos{background:rgba(255,255,255,0.1);border-radius:12px;padding:16px 32px;color:white}
-.at-num{font-size:48px;font-weight:700;color:#27ae60}
-.at-label{font-size:14px;color:#aaa;margin-top:4px}
-</style>
-</head><body>
+.atendidos{background:rgba(255,255,255,0.1);border-radius:12px;padding:14px 30px;color:white}
+.at-num{font-size:44px;font-weight:700;color:#27ae60}
+.at-label{font-size:13px;color:#aaa;margin-top:4px}
+</style></head><body>
 <h1>📇 Carnetización UTESA</h1>
 <p class="sub">Pantalla de turnos</p>
 <div class="turno-box">
   <div class="label">Turno en atención</div>
-  {% if turno > 0 %}
-  <div class="numero">#{{ turno }}</div>
-  {% else %}
-  <div class="esperando">Esperando...</div>
-  {% endif %}
+  {% if turno > 0 %}<div class="numero">#{{ turno }}</div>
+  {% else %}<div class="esperando">Esperando...</div>{% endif %}
 </div>
 <div class="atendidos">
   <div class="at-num">{{ atendidos }}</div>
   <div class="at-label">Atendidos hoy</div>
 </div>
-<script>
-setInterval(function(){location.reload();}, 4000);
-</script>
+<script>setInterval(function(){location.reload();},4000);</script>
 </body></html>"""
 
 # ─── RUTAS ───────────────────────────────────────────────────
@@ -386,7 +427,8 @@ def panel():
             nombre_est = partes[3].replace("_"," ") if len(partes)>3 else nombre
         except:
             pass
-        archivos.append({"archivo":nombre,"nombre_estudiante":nombre_est,"hora":hora,"tamano":tamano,"turno":turno_num})
+        archivos.append({"archivo":nombre,"nombre_estudiante":nombre_est,"hora":hora,
+                         "tamano":tamano,"turno":turno_num,"es_imagen":es_imagen(nombre)})
     historial = cargar_historial()
     e = get_estado()
     return render_template_string(PANEL, qr=generar_qr(url_subida), url_subida=url_subida,
@@ -398,6 +440,15 @@ def panel():
 @app.route("/total")
 def total():
     return {"total": len(os.listdir(CARPETA))}
+
+@app.route("/preview/<nombre>")
+def preview(nombre):
+    if not session.get("auth"):
+        return redirect("/")
+    ruta = os.path.join(CARPETA, nombre)
+    if os.path.exists(ruta) and es_imagen(nombre):
+        return send_file(ruta)
+    return "No disponible", 404
 
 @app.route("/subir", methods=["GET","POST"])
 def subir():
@@ -422,6 +473,21 @@ def subir():
         return render_template_string(CONFIRMACION, turno=turno, nombre=nombre,
                                       archivo=f.filename, fecha=fecha_str, tamano=tamano)
     return render_template_string(FORM)
+
+@app.route("/exportar")
+def exportar():
+    if not session.get("auth"):
+        return redirect("/")
+    historial = cargar_historial()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Turno","Nombre","Fecha y hora","Tamaño","Estado"])
+    for h in historial:
+        writer.writerow([h.get("turno",""), h.get("nombre",""), h.get("fecha",""), h.get("tamano",""), "Atendido"])
+    output.seek(0)
+    fecha_hoy = datetime.now().strftime("%Y%m%d")
+    return Response(output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment;filename=historial_{fecha_hoy}.csv"})
 
 @app.route("/llamar/<int:turno>", methods=["POST"])
 def llamar(turno):
@@ -495,9 +561,7 @@ def reiniciar_turno():
 @app.route("/pantalla")
 def pantalla():
     e = get_estado()
-    return render_template_string(PANTALLA,
-                                  turno=e.get("turno_actual",0),
-                                  atendidos=e.get("atendidos_hoy",0))
+    return render_template_string(PANTALLA, turno=e.get("turno_actual",0), atendidos=e.get("atendidos_hoy",0))
 
 @app.route("/logout")
 def logout():
