@@ -9,14 +9,15 @@ app.secret_key = "utesa_carnetizacion_2024"
 CARPETA = "/tmp/documentos"
 HISTORIAL_FILE = "/tmp/historial.json"
 TURNO_FILE = "/tmp/turno.json"
+ESTADO_FILE = "/tmp/estado.json"
 os.makedirs(CARPETA, exist_ok=True)
 
 CLAVE = "utesa2026"
 EXTS = {"pdf","jpg","jpeg","png","doc","docx"}
 MAX_MB = 25
 
-def ext_ok(nombre):
-    return "." in nombre and nombre.rsplit(".",1)[1].lower() in EXTS
+def ext_ok(n):
+    return "." in n and n.rsplit(".",1)[1].lower() in EXTS
 
 def generar_qr(url):
     qr = qrcode.QRCode(box_size=8, border=4)
@@ -34,7 +35,7 @@ def cargar_historial():
     return []
 
 def guardar_historial(h):
-    with open(HISTORIAL_FILE, "w") as f:
+    with open(HISTORIAL_FILE,"w") as f:
         json.dump(h, f, ensure_ascii=False)
 
 def cargar_turno():
@@ -46,9 +47,30 @@ def cargar_turno():
 def siguiente_turno():
     actual = cargar_turno()
     nuevo = (actual % 50) + 1
-    with open(TURNO_FILE, "w") as f:
+    with open(TURNO_FILE,"w") as f:
         json.dump({"actual": nuevo}, f)
     return nuevo
+
+def cargar_estado():
+    if os.path.exists(ESTADO_FILE):
+        with open(ESTADO_FILE) as f:
+            return json.load(f)
+    return {"turno_actual": 0, "atendidos_hoy": 0, "fecha_hoy": ""}
+
+def guardar_estado(e):
+    with open(ESTADO_FILE,"w") as f:
+        json.dump(e, f, ensure_ascii=False)
+
+def get_estado():
+    e = cargar_estado()
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    if e.get("fecha_hoy") != hoy:
+        e["atendidos_hoy"] = 0
+        e["fecha_hoy"] = hoy
+        guardar_estado(e)
+    return e
+
+# ─── TEMPLATES ───────────────────────────────────────────────
 
 LOGIN = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -57,107 +79,145 @@ LOGIN = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
 .card{background:white;width:100%;max-width:380px;padding:32px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.1);text-align:center}
-h2{color:#1a1a2e;margin-bottom:8px;font-size:22px}
-p{color:#777;font-size:14px;margin-bottom:24px}
+h2{color:#1a1a2e;margin-bottom:8px;font-size:22px}p{color:#777;font-size:14px;margin-bottom:24px}
 input{width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;font-size:15px;margin-bottom:14px}
 button{width:100%;padding:13px;background:#1a1a2e;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer}
 .err{color:#c0392b;font-size:13px;margin-bottom:12px}
 </style></head><body><div class="card">
-<h2>📇 Carnetización UTESA</h2>
-<p>Panel de la encargada</p>
+<h2>📇 Carnetización UTESA</h2><p>Panel de la encargada</p>
 {% if error %}<div class="err">Contraseña incorrecta.</div>{% endif %}
 <form method="post">
   <input type="password" name="clave" placeholder="Contraseña" required>
   <button type="submit">Entrar</button>
-</form>
-</div></body></html>"""
+</form></div></body></html>"""
 
 PANEL = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Carnetización - Panel</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#f0f2f5;padding:24px 16px;text-align:center}
-.card{background:white;max-width:580px;margin:0 auto 20px;padding:28px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.1)}
-h1{color:#1a1a2e;margin-bottom:6px;font-size:21px}
-p{color:#666;font-size:14px;margin-bottom:10px}
-img.qr{width:200px;height:200px;margin:10px 0}
+body{font-family:Arial,sans-serif;background:#f0f2f5;padding:20px 16px}
+.wrap{max-width:620px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card{background:white;padding:24px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.1);margin-bottom:18px;text-align:center}
+h1{color:#1a1a2e;font-size:20px;margin-bottom:6px}
+p{color:#666;font-size:13px;margin-bottom:8px}
+img.qr{width:190px;height:190px;margin:8px 0}
 .url{font-size:11px;color:#aaa;word-break:break-all}
-table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
-th{background:#f4f4f4;padding:9px 10px;color:#333}
-td{padding:9px 10px;border-bottom:1px solid #eee;vertical-align:middle}
-.btn{display:inline-block;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;border:none;cursor:pointer}
-.btn-dl{background:#1a73e8;color:white}
-.btn-del{background:#e74c3c;color:white}
-.btn-logout{background:#555;color:white;font-size:13px;padding:8px 18px}
-.empty{color:#999;padding:18px 0;font-size:14px}
-.top{display:flex;justify-content:space-between;align-items:center;max-width:580px;margin:0 auto 14px}
-.turno{display:inline-block;background:#1a1a2e;color:white;border-radius:50%;width:32px;height:32px;line-height:32px;text-align:center;font-weight:700;font-size:13px}
-.nuevo{background:#fff3cd;animation:parpadeo 1s infinite}
-@keyframes parpadeo{0%,100%{opacity:1}50%{opacity:0.5}}
-.tabs{display:flex;gap:8px;margin-bottom:16px;justify-content:center}
-.tab{padding:8px 20px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:14px;background:white;color:#555}
+.stats{display:flex;gap:12px;margin-bottom:18px}
+.stat{flex:1;background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.stat-num{font-size:32px;font-weight:700;color:#1a1a2e}
+.stat-label{font-size:12px;color:#888;margin-top:4px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{flex:1;padding:9px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:13px;background:white;color:#555;font-weight:600}
 .tab.active{background:#1a1a2e;color:white;border-color:#1a1a2e}
 .section{display:none}.section.active{display:block}
+table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
+th{background:#f4f4f4;padding:8px 10px;color:#333}
+td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle}
+.btn{display:inline-block;padding:5px 11px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;border:none;cursor:pointer;white-space:nowrap}
+.bl{background:#1a1a2e;color:white}
+.bg{background:#27ae60;color:white}
+.br{background:#e74c3c;color:white}
+.bo{background:#e67e22;color:white}
+.bb{background:#1a73e8;color:white}
+.bpurple{background:#8e44ad;color:white}
+.btn-logout{background:#555;color:white;font-size:12px;padding:7px 16px;border-radius:6px;text-decoration:none}
+.badge{display:inline-block;background:#1a1a2e;color:white;border-radius:50%;width:28px;height:28px;line-height:28px;text-align:center;font-weight:700;font-size:12px}
+.badge-g{background:#27ae60}
+.empty{color:#999;padding:16px 0;font-size:14px;text-align:center}
+.nuevo{background:#fff8e1}
+.btn-full{width:100%;padding:10px;font-size:14px;margin-top:8px}
+.pantalla-link{display:inline-block;margin-top:10px;padding:8px 18px;background:#8e44ad;color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600}
 </style>
 <audio id="alerta" src="https://www.soundjay.com/buttons/sounds/button-09.mp3" preload="auto"></audio>
-</head><body>
+</head><body><div class="wrap">
 <div class="top">
   <span style="font-size:13px;color:#555">Bienvenida 👋</span>
-  <a class="btn btn-logout" href="/logout">Cerrar sesión</a>
+  <div style="display:flex;gap:8px;align-items:center">
+    <a href="/pantalla" target="_blank" class="btn bpurple">📺 Pantalla turnos</a>
+    <a href="/logout" class="btn-logout">Cerrar sesión</a>
+  </div>
 </div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="stat-num">{{ total }}</div>
+    <div class="stat-label">Pendientes</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" style="color:#27ae60">{{ atendidos_hoy }}</div>
+    <div class="stat-label">Atendidos hoy</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" style="color:#8e44ad">{% if turno_actual > 0 %}#{{ turno_actual }}{% else %}—{% endif %}</div>
+    <div class="stat-label">Turno en pantalla</div>
+  </div>
+</div>
+
 <div class="card">
   <h1>📇 Carnetización UTESA</h1>
   <p>Los estudiantes escanean este QR para enviar documentos</p>
   <img class="qr" src="data:image/png;base64,{{ qr }}">
   <p class="url">{{ url_subida }}</p>
 </div>
-<div class="card">
+
+<div class="card" style="text-align:left">
   <div class="tabs">
     <button class="tab active" onclick="mostrar('pendientes',this)">📂 Pendientes ({{ total }})</button>
-    <button class="tab" onclick="mostrar('historial',this)">📋 Historial ({{ hist_total }})</button>
+    <button class="tab" onclick="mostrar('historial',this)">✅ Historial ({{ hist_total }})</button>
   </div>
+
   <div id="pendientes" class="section active">
     {% if archivos %}
     <table>
-      <tr><th>#</th><th>Nombre</th><th>Fecha y hora</th><th>Tamaño</th><th>Descargar</th><th>Borrar</th></tr>
+      <tr><th>#</th><th>Nombre</th><th>Hora</th><th>Tam.</th><th colspan="3">Acciones</th></tr>
       {% for a in archivos %}
-      <tr class="{{ 'nuevo' if loop.first and total > 0 else '' }}">
-        <td><span class="turno">{{ loop.revindex }}</span></td>
-        <td style="word-break:break-all;max-width:160px">{{ a.nombre }}</td>
-        <td style="white-space:nowrap">{{ a.fecha }}</td>
+      <tr class="{{ 'nuevo' if loop.first else '' }}">
+        <td><span class="badge">{{ a.turno }}</span></td>
+        <td style="word-break:break-all;max-width:130px">{{ a.nombre_estudiante }}</td>
+        <td style="white-space:nowrap">{{ a.hora }}</td>
         <td>{{ a.tamano }}</td>
-        <td><a class="btn btn-dl" href="/descargar/{{ a.archivo }}">⬇</a></td>
         <td>
-          <form method="post" action="/borrar/{{ a.archivo }}" onsubmit="return confirm('¿Borrar este archivo?')">
-            <button class="btn btn-del" type="submit">🗑</button>
+          <form method="post" action="/llamar/{{ a.turno }}" style="display:inline">
+            <button class="btn bpurple" title="Mostrar en pantalla">📺 Llamar</button>
           </form>
+        </td>
+        <td>
+          <form method="post" action="/atender/{{ a.archivo }}" style="display:inline" onsubmit="return confirm('¿Marcar como atendido?')">
+            <button class="btn bg" title="Marcar atendido">✓ Atendido</button>
+          </form>
+        </td>
+        <td>
+          <a class="btn bb" href="/descargar/{{ a.archivo }}">⬇</a>
         </td>
       </tr>
       {% endfor %}
     </table>
-    {% if total > 1 %}
-    <form method="post" action="/borrar-todos" onsubmit="return confirm('¿Borrar TODOS los documentos pendientes?')" style="margin-top:16px">
-      <button class="btn btn-del" style="width:100%;padding:10px;font-size:14px">🗑 Borrar todos los pendientes</button>
+    <form method="post" action="/borrar-todos" onsubmit="return confirm('¿Borrar TODOS los pendientes?')" style="margin-top:10px">
+      <button class="btn br btn-full">🗑 Borrar todos los pendientes</button>
     </form>
-    {% endif %}
-    <form method="post" action="/reiniciar-turno" onsubmit="return confirm('¿Reiniciar el contador de turnos desde #1?')" style="margin-top:10px">
-      <button class="btn" type="submit" style="width:100%;padding:10px;font-size:14px;background:#e67e22;color:white">🔄 Reiniciar turnos desde #1</button>
+    <form method="post" action="/reiniciar-turno" onsubmit="return confirm('¿Reiniciar turnos desde #1?')" style="margin-top:8px">
+      <button class="btn bo btn-full">🔄 Reiniciar turnos desde #1</button>
     </form>
     {% else %}
     <p class="empty">No hay documentos pendientes.</p>
+    <form method="post" action="/reiniciar-turno" onsubmit="return confirm('¿Reiniciar turnos desde #1?')" style="margin-top:8px">
+      <button class="btn bo btn-full">🔄 Reiniciar turnos desde #1</button>
+    </form>
     {% endif %}
   </div>
+
   <div id="historial" class="section">
     {% if historial %}
     <table>
-      <tr><th>#</th><th>Nombre</th><th>Fecha y hora</th><th>Tamaño</th><th>Estado</th></tr>
+      <tr><th>#</th><th>Nombre</th><th>Fecha y hora</th><th>Tam.</th><th>Estado</th></tr>
       {% for h in historial|reverse %}
       <tr>
-        <td><span class="turno" style="background:#888">{{ h.turno }}</span></td>
-        <td style="word-break:break-all;max-width:180px">{{ h.nombre }}</td>
+        <td><span class="badge badge-g">{{ h.turno }}</span></td>
+        <td style="word-break:break-all;max-width:160px">{{ h.nombre }}</td>
         <td style="white-space:nowrap">{{ h.fecha }}</td>
         <td>{{ h.tamano }}</td>
-        <td style="color:#27ae60;font-weight:600">✓ Recibido</td>
+        <td style="color:#27ae60;font-weight:600">✓ Atendido</td>
       </tr>
       {% endfor %}
     </table>
@@ -166,8 +226,9 @@ td{padding:9px 10px;border-bottom:1px solid #eee;vertical-align:middle}
     {% endif %}
   </div>
 </div>
+</div>
 <script>
-function mostrar(id, btn){
+function mostrar(id,btn){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -203,36 +264,29 @@ button{width:100%;margin-top:22px;padding:15px;background:#1a73e8;color:white;bo
 <h2>📄 Enviar documento a imprimir</h2>
 <form method="post" enctype="multipart/form-data" onsubmit="return validar()">
   <label>Tu nombre</label>
-  <input type="text" name="nombre" id="nombre" placeholder="Ej. Juan Pérez" required>
+  <input type="text" name="nombre" placeholder="Ej. Juan Pérez" required>
   <label>Selecciona el documento</label>
   <input type="file" name="doc" id="doc" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" required onchange="mostrarPeso()">
   <div class="info">Formatos: PDF, Word, JPG, PNG &nbsp;•&nbsp; Máximo: 25 MB</div>
   <div id="peso" class="info" style="color:#1a73e8;margin-top:4px"></div>
-  <div id="err-size" class="err-size">⚠ El archivo supera los 25 MB. Elige uno más pequeño.</div>
+  <div id="err-size" class="err-size">⚠ El archivo supera los 25 MB.</div>
   <button type="submit">📤 Enviar documento</button>
-</form>
-</div>
+</form></div>
 <script>
 function mostrarPeso(){
-  var f = document.getElementById('doc').files[0];
-  var err = document.getElementById('err-size');
-  var info = document.getElementById('peso');
+  var f=document.getElementById('doc').files[0];
   if(f){
-    var mb = (f.size/1024/1024).toFixed(2);
-    info.textContent = 'Tamaño: ' + mb + ' MB';
-    err.style.display = f.size > 25*1024*1024 ? 'block' : 'none';
+    var mb=(f.size/1024/1024).toFixed(2);
+    document.getElementById('peso').textContent='Tamaño: '+mb+' MB';
+    document.getElementById('err-size').style.display=f.size>25*1024*1024?'block':'none';
   }
 }
 function validar(){
-  var f = document.getElementById('doc').files[0];
-  if(f && f.size > 25*1024*1024){
-    document.getElementById('err-size').style.display='block';
-    return false;
-  }
+  var f=document.getElementById('doc').files[0];
+  if(f&&f.size>25*1024*1024){document.getElementById('err-size').style.display='block';return false;}
   return true;
 }
-</script>
-</body></html>"""
+</script></body></html>"""
 
 CONFIRMACION = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -241,27 +295,62 @@ CONFIRMACION = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f0f2f5;padding:40px 16px;text-align:center}
 .card{background:white;max-width:400px;margin:0 auto;padding:36px 28px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.1)}
-.turno{font-size:80px;font-weight:700;color:#1a1a2e;line-height:1;margin:16px 0}
+.turno{font-size:90px;font-weight:700;color:#1a1a2e;line-height:1;margin:16px 0}
 h2{color:#1a1a2e;font-size:20px;margin-bottom:8px}
 p{color:#666;font-size:15px;margin-bottom:6px}
-.ok{color:#27ae60;font-size:22px;margin-bottom:8px}
-.detalle{background:#f4f6f9;border-radius:8px;padding:14px;margin-top:20px;font-size:13px;color:#555;text-align:left}
+.ok{color:#27ae60;font-size:26px;margin-bottom:8px}
+.detalle{background:#f4f6f9;border-radius:8px;padding:14px;margin-top:20px;font-size:13px;color:#555;text-align:left;line-height:2}
 .detalle b{color:#1a1a2e}
 </style></head><body><div class="card">
 <div class="ok">✅</div>
 <h2>¡Documento enviado!</h2>
 <p>Tu número de turno es:</p>
 <div class="turno">#{{ turno }}</div>
-<p style="color:#888;font-size:13px">Espera a que la encargada te llame</p>
+<p style="color:#888;font-size:13px">Espera a que te llamen</p>
 <div class="detalle">
-  <p><b>Nombre:</b> {{ nombre }}</p>
-  <p style="margin-top:6px"><b>Archivo:</b> {{ archivo }}</p>
-  <p style="margin-top:6px"><b>Hora:</b> {{ fecha }}</p>
-  <p style="margin-top:6px"><b>Tamaño:</b> {{ tamano }}</p>
+  <div><b>Nombre:</b> {{ nombre }}</div>
+  <div><b>Archivo:</b> {{ archivo }}</div>
+  <div><b>Hora:</b> {{ fecha }}</div>
+  <div><b>Tamaño:</b> {{ tamano }}</div>
 </div>
 </div></body></html>"""
 
-# ---------- rutas ----------
+PANTALLA = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Turnos - Carnetización UTESA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:20px}
+h1{color:white;font-size:28px;margin-bottom:8px;opacity:0.7}
+.sub{color:#aaa;font-size:16px;margin-bottom:40px}
+.turno-box{background:white;border-radius:24px;padding:40px 60px;margin-bottom:30px}
+.label{color:#888;font-size:18px;margin-bottom:10px}
+.numero{font-size:160px;font-weight:700;color:#1a1a2e;line-height:1}
+.esperando{color:#aaa;font-size:20px;margin-top:10px}
+.atendidos{background:rgba(255,255,255,0.1);border-radius:12px;padding:16px 32px;color:white}
+.at-num{font-size:48px;font-weight:700;color:#27ae60}
+.at-label{font-size:14px;color:#aaa;margin-top:4px}
+</style>
+</head><body>
+<h1>📇 Carnetización UTESA</h1>
+<p class="sub">Pantalla de turnos</p>
+<div class="turno-box">
+  <div class="label">Turno en atención</div>
+  {% if turno > 0 %}
+  <div class="numero">#{{ turno }}</div>
+  {% else %}
+  <div class="esperando">Esperando...</div>
+  {% endif %}
+</div>
+<div class="atendidos">
+  <div class="at-num">{{ atendidos }}</div>
+  <div class="at-label">Atendidos hoy</div>
+</div>
+<script>
+setInterval(function(){location.reload();}, 4000);
+</script>
+</body></html>"""
+
+# ─── RUTAS ───────────────────────────────────────────────────
 
 @app.route("/", methods=["GET","POST"])
 def login():
@@ -285,20 +374,26 @@ def panel():
     for nombre in archivos_raw:
         ruta = os.path.join(CARPETA, nombre)
         stat = os.stat(ruta)
-        mb = stat.st_size / 1024 / 1024
-        tamano = f"{mb:.2f} MB" if mb >= 1 else f"{stat.st_size//1024} KB"
-        partes = nombre.split("_", 3)
-        fecha_str = ""
-        if len(partes) >= 2:
-            try:
-                fecha_str = datetime.strptime(partes[0]+"_"+partes[1], "%Y%m%d_%H%M%S").strftime("%d/%m/%Y %H:%M")
-            except:
-                fecha_str = ""
-        archivos.append({"archivo": nombre, "nombre": nombre, "fecha": fecha_str, "tamano": tamano})
+        mb = stat.st_size/1024/1024
+        tamano = f"{mb:.2f} MB" if mb>=1 else f"{stat.st_size//1024} KB"
+        partes = nombre.split("_")
+        hora = ""
+        turno_num = "?"
+        nombre_est = nombre
+        try:
+            hora = datetime.strptime(partes[0]+"_"+partes[1], "%Y%m%d_%H%M%S").strftime("%H:%M")
+            turno_num = partes[2]
+            nombre_est = partes[3].replace("_"," ") if len(partes)>3 else nombre
+        except:
+            pass
+        archivos.append({"archivo":nombre,"nombre_estudiante":nombre_est,"hora":hora,"tamano":tamano,"turno":turno_num})
     historial = cargar_historial()
+    e = get_estado()
     return render_template_string(PANEL, qr=generar_qr(url_subida), url_subida=url_subida,
                                   archivos=archivos, total=len(archivos),
-                                  historial=historial, hist_total=len(historial))
+                                  historial=historial, hist_total=len(historial),
+                                  atendidos_hoy=e["atendidos_hoy"],
+                                  turno_actual=e.get("turno_actual",0))
 
 @app.route("/total")
 def total():
@@ -309,30 +404,59 @@ def subir():
     if request.method == "POST":
         f = request.files.get("doc")
         nombre = request.form.get("nombre","").strip() or "Estudiante"
-        if not f or f.filename == "":
-            return render_template_string(FORM)
-        if not ext_ok(f.filename):
+        if not f or f.filename == "" or not ext_ok(f.filename):
             return render_template_string(FORM)
         contenido = f.read()
-        if len(contenido) > MAX_MB * 1024 * 1024:
+        if len(contenido) > MAX_MB*1024*1024:
             return render_template_string(FORM)
         turno = siguiente_turno()
         fecha = datetime.now()
         fecha_str = fecha.strftime("%d/%m/%Y %H:%M")
         marca = fecha.strftime("%Y%m%d_%H%M%S")
         nombre_limpio = nombre.replace(" ","_")
-        nombre_final = f"{marca}_{nombre_limpio}_{f.filename.replace(' ','_')}"
-        ruta = os.path.join(CARPETA, nombre_final)
-        with open(ruta, "wb") as out:
+        nombre_final = f"{marca}_{turno}_{nombre_limpio}_{f.filename.replace(' ','_')}"
+        with open(os.path.join(CARPETA, nombre_final),"wb") as out:
             out.write(contenido)
-        mb = len(contenido) / 1024 / 1024
-        tamano = f"{mb:.2f} MB" if mb >= 1 else f"{len(contenido)//1024} KB"
-        h = cargar_historial()
-        h.append({"turno": turno, "nombre": nombre, "archivo": f.filename, "fecha": fecha_str, "tamano": tamano})
-        guardar_historial(h)
+        mb = len(contenido)/1024/1024
+        tamano = f"{mb:.2f} MB" if mb>=1 else f"{len(contenido)//1024} KB"
         return render_template_string(CONFIRMACION, turno=turno, nombre=nombre,
                                       archivo=f.filename, fecha=fecha_str, tamano=tamano)
     return render_template_string(FORM)
+
+@app.route("/llamar/<int:turno>", methods=["POST"])
+def llamar(turno):
+    if not session.get("auth"):
+        return redirect("/")
+    e = get_estado()
+    e["turno_actual"] = turno
+    guardar_estado(e)
+    return redirect("/panel")
+
+@app.route("/atender/<nombre>", methods=["POST"])
+def atender(nombre):
+    if not session.get("auth"):
+        return redirect("/")
+    ruta = os.path.join(CARPETA, nombre)
+    if os.path.exists(ruta):
+        partes = nombre.split("_")
+        turno_num = int(partes[2]) if len(partes)>2 and partes[2].isdigit() else 0
+        nombre_est = partes[3].replace("_"," ") if len(partes)>3 else nombre
+        hora = ""
+        try:
+            hora = datetime.strptime(partes[0]+"_"+partes[1], "%Y%m%d_%H%M%S").strftime("%d/%m/%Y %H:%M")
+        except:
+            hora = datetime.now().strftime("%d/%m/%Y %H:%M")
+        stat = os.stat(ruta)
+        mb = stat.st_size/1024/1024
+        tamano = f"{mb:.2f} MB" if mb>=1 else f"{stat.st_size//1024} KB"
+        h = cargar_historial()
+        h.append({"turno":turno_num,"nombre":nombre_est,"archivo":nombre,"fecha":hora,"tamano":tamano})
+        guardar_historial(h)
+        e = get_estado()
+        e["atendidos_hoy"] = e.get("atendidos_hoy",0) + 1
+        guardar_estado(e)
+        os.remove(ruta)
+    return redirect("/panel")
 
 @app.route("/descargar/<nombre>")
 def descargar(nombre):
@@ -364,9 +488,16 @@ def borrar_todos():
 def reiniciar_turno():
     if not session.get("auth"):
         return redirect("/")
-    with open(TURNO_FILE, "w") as f:
-        json.dump({"actual": 0}, f)
+    with open(TURNO_FILE,"w") as f:
+        json.dump({"actual":0}, f)
     return redirect("/panel")
+
+@app.route("/pantalla")
+def pantalla():
+    e = get_estado()
+    return render_template_string(PANTALLA,
+                                  turno=e.get("turno_actual",0),
+                                  atendidos=e.get("atendidos_hoy",0))
 
 @app.route("/logout")
 def logout():
@@ -374,5 +505,5 @@ def logout():
     return redirect("/")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT",5000))
     app.run(host="0.0.0.0", port=port)
