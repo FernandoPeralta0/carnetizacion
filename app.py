@@ -1,4 +1,7 @@
 import os, io, base64, json, csv
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from flask import Flask, request, render_template_string, send_file, redirect, session, Response
 from datetime import datetime, timedelta
 import qrcode
@@ -325,6 +328,10 @@ function filtrarHistorial(){
   var q=document.getElementById('buscar').value.toLowerCase();
   document.querySelectorAll('.fila-hist').forEach(function(r){r.style.display=r.textContent.toLowerCase().includes(q)?'':'none';});
 }
+// Cerrar sesión al cerrar la pestaña
+window.addEventListener('beforeunload', function(){
+  navigator.sendBeacon('/logout-beacon');
+});
 var totalAnterior={{ total }};
 setInterval(function(){
   fetch('/total').then(r=>r.json()).then(d=>{
@@ -562,15 +569,105 @@ def exportar():
     if not session.get("auth"):
         return redirect("/")
     historial = cargar_historial()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Turno","Nombre","Fecha y hora","Archivos","Estado"])
-    for h in historial:
-        writer.writerow([h.get("turno",""), h.get("nombre",""), h.get("fecha",""), h.get("archivo",""), "Atendido"])
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Historial"
+
+    # Colores
+    azul_oscuro = "1A1A2E"
+    azul_claro  = "D6E4F7"
+    verde       = "27AE60"
+    blanco      = "FFFFFF"
+    gris        = "F4F4F4"
+
+    # Fila 1: Título principal
+    ws.merge_cells("A1:F1")
+    titulo = ws["A1"]
+    titulo.value = "UNIVERSIDAD UTESA — Departamento de Carnetización"
+    titulo.font = Font(bold=True, size=14, color=blanco)
+    titulo.fill = PatternFill("solid", fgColor=azul_oscuro)
+    titulo.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    # Fila 2: Fecha de exportación
+    ws.merge_cells("A2:F2")
+    sub = ws["A2"]
+    sub.value = f"Exportado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    sub.font = Font(italic=True, size=10, color="555555")
+    sub.fill = PatternFill("solid", fgColor="EEF3FF")
+    sub.alignment = Alignment(horizontal="center")
+    ws.row_dimensions[2].height = 18
+
+    # Fila 3: vacía
+    ws.row_dimensions[3].height = 6
+
+    # Fila 4: Encabezados de columnas
+    headers = ["# Turno", "Nombre del estudiante", "Fecha y hora", "Archivos enviados", "Tamaño", "Estado"]
+    borde = Border(
+        left=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),
+        bottom=Side(style="thin", color="CCCCCC")
+    )
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=4, column=col, value=header)
+        cell.font = Font(bold=True, size=11, color=blanco)
+        cell.fill = PatternFill("solid", fgColor=azul_oscuro)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = borde
+    ws.row_dimensions[4].height = 22
+
+    # Filas de datos
+    for i, h in enumerate(historial):
+        row = i + 5
+        fila_color = blanco if i % 2 == 0 else gris
+        valores = [
+            h.get("turno", ""),
+            h.get("nombre", ""),
+            h.get("fecha", ""),
+            h.get("archivo", ""),
+            h.get("tamano", ""),
+            "✓ Atendido"
+        ]
+        for col, val in enumerate(valores, 1):
+            cell = ws.cell(row=row, column=col, value=str(val))
+            cell.fill = PatternFill("solid", fgColor=fila_color)
+            cell.border = borde
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            if col == 1:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.font = Font(bold=True)
+            if col == 6:
+                cell.font = Font(color=verde, bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[row].height = 18
+
+    # Fila resumen
+    total_row = len(historial) + 5
+    ws.merge_cells(f"A{total_row}:E{total_row}")
+    resumen = ws[f"A{total_row}"]
+    resumen.value = f"Total de estudiantes atendidos: {len(historial)}"
+    resumen.font = Font(bold=True, size=11, color=azul_oscuro)
+    resumen.fill = PatternFill("solid", fgColor=azul_claro)
+    resumen.alignment = Alignment(horizontal="right", vertical="center")
+    ws[f"F{total_row}"].fill = PatternFill("solid", fgColor=azul_claro)
+    ws.row_dimensions[total_row].height = 20
+
+    # Anchos de columna
+    anchos = [10, 28, 18, 35, 12, 14]
+    for i, ancho in enumerate(anchos, 1):
+        ws.column_dimensions[get_column_letter(i)].width = ancho
+
+    # Guardar
+    output = io.BytesIO()
+    wb.save(output)
     output.seek(0)
     fecha_hoy = datetime.now().strftime("%Y%m%d")
-    return Response(output.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment;filename=historial_{fecha_hoy}.csv"})
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment;filename=historial_carnetizacion_{fecha_hoy}.xlsx"}
+    )
 
 @app.route("/cambiar-clave", methods=["POST"])
 def cambiar_clave():
@@ -672,6 +769,11 @@ def pantalla():
     e = get_estado()
     return render_template_string(PANTALLA, turno=e.get("turno_actual",0),
                                   atendidos=e.get("atendidos_hoy",0), logo=UTESA_LOGO)
+
+@app.route("/logout-beacon", methods=["POST"])
+def logout_beacon():
+    session.clear()
+    return "", 204
 
 @app.route("/logout")
 def logout():
